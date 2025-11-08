@@ -11,12 +11,12 @@ mockDB = {
 
 EASTERN_TZ = pytz.timezone('America/New_York')
 
-async def log_medicine_event(userPhone, now=None):
+def log_medicine_event(userPhone, now=None):
     """
     this is creating a priorritized med stack which 
     help the logging logic of piled up meds waiting to be logged. 
     """
-    user = await mockDB['user'].find_one({
+    user = mockDB['user'].find_one({
         "phone": userPhone 
     })
     
