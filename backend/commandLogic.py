@@ -1,13 +1,29 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import asyncio
-from aiParsing import ai_parse_medicine_message
-from loggingStack import log_medicine_event
-from DBsaving import users 
+from aiParsing import aiParseMedicine
+from loggingStack import medcineLoggingLogic
+from DBsaving import users  
 from pytz import timezone
 
 textD = Blueprint('textD', __name__)
 EASTERN_TZ = timezone('US/Eastern')
+
+def printingStack(stack):
+    """Returns a clean, vertical stack display"""
+    if not stack:
+        return "No medications need logging right now."
+    
+    printingLog = ["Your medication stack:"]
+    
+    for med in stack:
+        statusLog = "(missed)" if med['status'] == 'missed' else "(current)"
+        printingLog.append(f"{med['stack_position']}. {med['medicine_name']} at {med['time']} {statusLog}")  
+    
+    printingLog.append("")  
+    printingLog.append("Text the number to log that medication")
+    
+    return "\n".join(printingLog)
 
 def commandLogic(userPhone, messageText):
     """
@@ -15,11 +31,11 @@ def commandLogic(userPhone, messageText):
     """
     medLogic = messageText.strip().lower()
 
-   
+  
     if medLogic.isdigit():
         return medTaken(userPhone, int(medLogic))
 
-   
+  
     elif medLogic == "pause":
         users.update_one({"phone": userPhone}, {"$set": {"paused": True}})
         return "Reminders paused successfully. Text 'resume' to continue reminders again."
@@ -29,7 +45,7 @@ def commandLogic(userPhone, messageText):
         users.update_one({"phone": userPhone}, {"$set": {"paused": False}})
         return "Reminders resumed successfully. You will continue receiving notifications."
 
- 
+
     elif medLogic == "stop":
         result = users.delete_one({"phone": userPhone})
         if result.deleted_count > 0:
@@ -45,15 +61,15 @@ def commandLogic(userPhone, messageText):
             return "Please specify the medicine details. Example: 'edit vitamin d 8 am monday'"
 
         try:
-            
-            aidata = asyncio.run(ai_parse_medicine_message(medParsed))
+          
+            aidata = asyncio.run(aiParseMedicine(medParsed))
         except Exception as e:
             return f"Error during AI parsing: {e}"
 
         if not aidata:
             return "Failed to parse medicine details. Please ensure the format is correct."
 
- 
+
         if medLogic.startswith("edit"):
             result = users.update_one(
                 {
@@ -72,7 +88,7 @@ def commandLogic(userPhone, messageText):
             else:
                 return f"No medicine named '{aidata['medicine_name']}' found to edit."
 
-
+      
         elif medLogic.startswith("add"):
             newMed = {
                 "name": aidata['medicine_name'],
@@ -96,21 +112,21 @@ def commandLogic(userPhone, messageText):
 
 def medTaken(userPhone, position):
     """Handles when a user texts a number to log medication."""
-    stack = log_medicine_event(userPhone)
-    medicine_to_log = None
+    stack = medcineLoggingLogic(userPhone)
+    medicineLog = None
 
     for med in stack:
         if med.get('stack_position') == position:
-            medicine_to_log = med
+            medicineLog = med
             break
 
-    if not medicine_to_log:
-        return f"No medicine found at position {position}"
+    if not medicineLog:
+        return f"Position {position} not found.\n\n{printingStack(stack)}"
 
     result = users.update_one(
         {
             "phone": userPhone,
-            "medications.name": medicine_to_log['medicine_name']
+            "medications.name": medicineLog['medicine_name']
         },
         {
             "$set": {
@@ -121,9 +137,13 @@ def medTaken(userPhone, position):
     )
 
     if result.modified_count > 0:
-        return f"Logged {medicine_to_log['medicine_name']} as taken!"
+        newStack = medcineLoggingLogic(userPhone)
+        if newStack: 
+            return f"Logged {medicineLog['medicine_name']}!\n\n{printingStack(newStack)}"  
+        else:
+            return f"Logged {medicineLog['medicine_name']}!\n\nAll medications completed."
     else:
-        return f"Failed to log {medicine_to_log['medicine_name']}"
+        return f"Failed to log {medicineLog['medicine_name']}"
 
 
 @textD.route('/api/sms/handle', methods=['POST'])
