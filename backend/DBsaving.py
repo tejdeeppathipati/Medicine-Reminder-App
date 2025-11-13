@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 import re
 from pymongo import MongoClient
+from typing import Tuple
 
 # DBsaving.py
 # works on creating and updating users based on form submissions. this includes medicine and caregivers.
@@ -14,12 +15,42 @@ user_setup_bp = Blueprint('user_setup', __name__)
 from flask_cors import CORS
 CORS(user_setup_bp)
 
-# connection to mongodb
 client = MongoClient('mongodb://localhost:27017/')
 db = client['medication_reminder']
 users = db['users']
 
 # api routes begin below
+WHATSAPP_PREFIX = "whatsapp:"
+PHONE_PATTERN = re.compile(r'^\+?1?\d{9,15}$')
+
+
+def _split_phone(phone: str) -> Tuple[str, str]:
+    """Returns (prefix, digits) where prefix may be whatsapp: and digits are raw E.164-ish."""
+    cleaned = (phone or "").strip()
+    if cleaned.lower().startswith(WHATSAPP_PREFIX):
+        return WHATSAPP_PREFIX, cleaned[len(WHATSAPP_PREFIX):].strip()
+    return "", cleaned
+
+
+def _normalize_phone(phone: str) -> str:
+    """Removes extra characters but keeps the whatsapp prefix if present."""
+    prefix, digits = _split_phone(phone)
+    digits = re.sub(r'[^\d+]', '', digits)
+    return f"{prefix}{digits}"
+
+
+def _validate_phone(phone: str) -> Tuple[bool, str]:
+    """Ensures the phone matches our regex and returns the normalized value."""
+    normalized = _normalize_phone(phone)
+    _, digits = _split_phone(normalized)
+    return bool(PHONE_PATTERN.match(digits)), normalized
+
+
+def _user_id_from_phone(phone: str) -> str:
+    """Turns the phone digits into our user_id format."""
+    _, digits = _split_phone(phone)
+    digits_only = re.sub(r'\D', '', digits)
+    return f"user_{digits_only}"
 
 @user_setup_bp.route('/api/user/setup', methods=['POST'])
 def setup_user():
@@ -56,8 +87,10 @@ def setup_user():
         return jsonify({'error': 'At least one medication is required'})
     
     # checks phone format specifically, does not allow incorrect formats
-    if not re.match(r'^\+?1?\d{9,15}$', data['phone']):
+    valid_phone, normalized_phone = _validate_phone(data['phone'])
+    if not valid_phone:
         return jsonify({'error': 'Invalid phone number'})
+    data['phone'] = normalized_phone
     
     # checks correct medications
     for med in data['medications']:
@@ -72,9 +105,13 @@ def setup_user():
     for caregiver in data.get('caregivers', []):
         if not caregiver.get('name') or not caregiver.get('phone'):
             return jsonify({'error': 'Caregiver must have name and phone'})
+        valid_caregiver_phone, normalized_caregiver_phone = _validate_phone(caregiver['phone'])
+        if not valid_caregiver_phone:
+            return jsonify({'error': f"Invalid caregiver phone: {caregiver['phone']}"})
+        caregiver['phone'] = normalized_caregiver_phone
     
     # new user added to users collection - formatting
-    user_id = f"user_{data['phone'].replace('+', '').replace(' ', '')}"
+    user_id = _user_id_from_phone(data['phone'])
     user_data = {
         'user_id': user_id,
         'name': data['name'],

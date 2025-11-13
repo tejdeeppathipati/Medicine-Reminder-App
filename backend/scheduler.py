@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler 
 
-from backend.DBsaving import users
+from backend.db import users
 from backend.notifications import twilio_service
 
 DEFAULT_TZ = os.getenv("DEFAULT_TIMEZONE", "US/Eastern")
@@ -137,4 +137,3 @@ def _dispatch_due_reminders(app) -> None:
 
             if updated:
                 users.update_one({"_id": user["_id"]}, {"$set": {"medications": meds}})
-

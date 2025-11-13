@@ -1,15 +1,7 @@
 from datetime import date, datetime, timedelta
 import pytz
-from pymongo import MongoClient  
-
+from backend.db import users as users_collection
 from backend.notifications import twilio_service
-
-client = MongoClient('mongodb://localhost:27017/')
-db = client['medication_reminder']
-mockDB = {
-    'user': db['users'],  
-    'medicine': db['users']  
-}
 
 EASTERN_TZ = pytz.timezone('America/New_York')
 
@@ -18,7 +10,7 @@ def medcineLoggingLogic(userPhone, now=None):
     this is creating a priorritized med stack which 
     help the logging logic of piled up meds waiting to be logged. 
     """
-    user = mockDB['user'].find_one({
+    user = users_collection.find_one({
         "phone": userPhone 
     })
     
