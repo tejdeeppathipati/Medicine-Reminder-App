@@ -2,6 +2,8 @@ from datetime import date, datetime, timedelta
 import pytz
 from pymongo import MongoClient  
 
+from backend.notifications import twilio_service
+
 client = MongoClient('mongodb://localhost:27017/')
 db = client['medication_reminder']
 mockDB = {
@@ -78,7 +80,11 @@ def medcineLoggingLogic(userPhone, now=None):
         careAlert = f"Alert: {user_name} has missed {len(missedMedStack)} medications: {', '.join(careMed)}. Please check on them."
         
         for caregiver in caregivers:
-            print(f"CAREGIVER ALERT to {caregiver['name']} ({caregiver['phone']}): {careAlert}")
+            caregiver_phone = caregiver.get('phone')
+            if not caregiver_phone:
+                continue
+            twilio_service.send_sms(to=caregiver_phone, body=careAlert)
+            print(f"CAREGIVER ALERT to {caregiver.get('name', 'Caregiver')} ({caregiver_phone}): {careAlert}")
     
     currentMedStack.sort(key=lambda x: x['time'])
     missedMedStack.sort(key=lambda x: x['time'])

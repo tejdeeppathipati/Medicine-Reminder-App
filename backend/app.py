@@ -1,5 +1,9 @@
+import os
+
 from flask import Flask
+
 from backend.DBsaving import user_setup_bp
+from backend.scheduler import start_scheduler
 
 # app.py
 # flask app entry point used to register the blueprint and sets up routes for the api
@@ -7,6 +11,9 @@ from backend.DBsaving import user_setup_bp
 
 app = Flask(__name__)
 app.register_blueprint(user_setup_bp)
+
+if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    start_scheduler(app)
 
 if __name__ == "__main__":
     app.run(debug=True)
