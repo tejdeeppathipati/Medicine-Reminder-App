@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import asyncio
-from backend.aiParsing import aiParseMedicine
-from backend.loggingStack import medcineLoggingLogic
-from backend.db import users  
+from aiParsing import aiParseMedicine
+from loggingStack import medcineLoggingLogic
+from DBsaving import users  
 from pytz import timezone
 
 textD = Blueprint('textD', __name__)
@@ -62,7 +62,7 @@ def commandLogic(userPhone, messageText):
 
         try:
           
-            aidata = asyncio.run(aiParseMedicine(medParsed))
+            aidata = aiParseMedicine(medParsed)
         except Exception as e:
             return f"Error during AI parsing: {e}"
 
