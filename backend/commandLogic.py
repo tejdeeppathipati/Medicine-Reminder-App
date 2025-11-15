@@ -5,6 +5,8 @@ from backend.aiParsing import aiParseMedicine
 from backend.loggingStack import medcineLoggingLogic
 from backend.db import users  
 from pytz import timezone
+from backend.notifications import twilio_service
+from flask import Response
 
 textD = Blueprint('textD', __name__)
 EASTERN_TZ = timezone('US/Eastern')
@@ -146,15 +148,38 @@ def medTaken(userPhone, position):
         return f"Failed to log {medicineLog['medicine_name']}"
 
 
+# @textD.route('/api/sms/handle', methods=['POST'])
+# def handle_sms():
+#     """Receives SMS from Twilio webhook or curl request."""
+#     data = request.get_json(silent=True) or request.form
+#     user_phone = data.get('From') or data.get('phone')
+#     message_text = data.get('Body') or data.get('message')
+
+#     if not user_phone or not message_text:
+#         return jsonify({'error': 'Missing phone or message'}), 400
+
+#     response = commandLogic(user_phone, message_text)
+#     #twilio_service.send_sms(to=user_phone, body=response)
+#     #return jsonify({'response': response})
+#     twiml = f"<Response><Message>{response}</Message></Response>"
+#     return Response(twiml, mimetype="text/xml")
+
 @textD.route('/api/sms/handle', methods=['POST'])
 def handle_sms():
     """Receives SMS from Twilio webhook or curl request."""
-    data = request.get_json()
+    data = request.form.to_dict()
+    if not data:
+        json_data = request.get_json(silent=True)
+        if json_data:
+            data = json_data
+
     user_phone = data.get('From') or data.get('phone')
     message_text = data.get('Body') or data.get('message')
 
     if not user_phone or not message_text:
         return jsonify({'error': 'Missing phone or message'}), 400
 
-    response = commandLogic(user_phone, message_text)
-    return jsonify({'response': response})
+    response_text = commandLogic(user_phone, message_text)
+    twiml = f"<Response><Message>{response_text}</Message></Response>"
+    return Response(twiml, mimetype="text/xml")
+

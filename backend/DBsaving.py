@@ -9,7 +9,6 @@ from typing import Tuple
 # form submissions from the frontend are processed here and checked before being saved to mongodb.
 # we can also change this if additional user data is needed or to include dynamic validation rules.
 
-
 user_setup_bp = Blueprint('user_setup', __name__)
 
 from flask_cors import CORS

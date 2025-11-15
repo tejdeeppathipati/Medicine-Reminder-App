@@ -59,6 +59,11 @@ class TwilioNotificationService:
         if not body:
             raise ValueError("SMS body cannot be empty.")
 
+        if not to.lower().startswith("whatsapp:"):
+            digits = to.strip()
+            digits = digits if digits.startswith("+") else f"+{digits}"
+            to = f"whatsapp:{digits}"
+
         if self.config.enabled and self._client is not None:
             try:
                 message = self._client.messages.create(
@@ -77,4 +82,3 @@ class TwilioNotificationService:
 
 
 twilio_service = TwilioNotificationService()
-
