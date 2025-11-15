@@ -5,11 +5,19 @@ from backend.notifications import twilio_service
 
 EASTERN_TZ = pytz.timezone('America/New_York')
 
+def normalize_phone(phone):
+    """Remove 'whatsapp:' prefix if present"""
+    if phone and phone.lower().startswith("whatsapp:"):
+        return phone[9:] 
+    return phone
+
 def medcineLoggingLogic(userPhone, now=None):
     """
     this is creating a priorritized med stack which 
     help the logging logic of piled up meds waiting to be logged. 
     """
+    # Normalize phone number (remove whatsapp: prefix if present)
+    userPhone = normalize_phone(userPhone)
     user = users_collection.find_one({
         "phone": userPhone 
     })

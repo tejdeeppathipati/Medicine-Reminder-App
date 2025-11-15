@@ -71,13 +71,34 @@ def _get_timezone(user_tz: Optional[str]) -> pytz.timezone:
 
 def _parse_med_time(now: datetime, time_str: str, tz: pytz.timezone) -> Optional[datetime]:
     try:
-        hour, minute = map(int, time_str.split(":"))
+        # Handle both 24-hour format (16:11) and 12-hour format (4:11pm)
+        time_str = time_str.strip().lower()
+        
+        # Check if it's 12-hour format with am/pm
+        is_pm = time_str.endswith('pm')
+        is_am = time_str.endswith('am')
+        
+        if is_pm or is_am:
+            # Remove am/pm suffix
+            time_str = time_str[:-2].strip()
+        
+        # Parse hour and minute
+        parts = time_str.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        
+        # Convert to 24-hour format if needed
+        if is_pm and hour != 12:
+            hour += 12
+        elif is_am and hour == 12:
+            hour = 0
+        
         scheduled = tz.localize(
             datetime(now.year, now.month, now.day, hour, minute, 0)
         )
         return scheduled
-    except Exception:
-        logging.warning("Unable to parse medication time '%s'. Skipping.", time_str)
+    except Exception as e:
+        logging.warning("Unable to parse medication time '%s'. Error: %s", time_str, str(e))
         return None
 
 

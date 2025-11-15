@@ -1,15 +1,21 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import asyncio
-from aiParsing import aiParseMedicine
-from loggingStack import medcineLoggingLogic
-from DBsaving import users  
+from backend.aiParsing import aiParseMedicine
+from backend.loggingStack import medcineLoggingLogic
+from backend.db import users  
 from pytz import timezone
 from backend.notifications import twilio_service
 from flask import Response
 
 textD = Blueprint('textD', __name__)
 EASTERN_TZ = timezone('US/Eastern')
+
+def normalize_phone(phone):
+    """Remove 'whatsapp:' prefix if present"""
+    if phone and phone.lower().startswith("whatsapp:"):
+        return phone[9:]  # Remove 'whatsapp:' prefix
+    return phone
 
 def printingStack(stack):
     """Returns a clean, vertical stack display"""
@@ -31,6 +37,8 @@ def commandLogic(userPhone, messageText):
     """
     Handles SMS commands: numeric logs, pause, resume, stop, edit, add.
     """
+    # Normalize phone number (remove whatsapp: prefix if present)
+    userPhone = normalize_phone(userPhone)
     medLogic = messageText.strip().lower()
 
   
@@ -98,10 +106,13 @@ def commandLogic(userPhone, messageText):
                 "day": aidata.get('day', ""),
                 "status": "pending"
             }
+            print(f"DEBUG: Trying to add medicine for phone: {userPhone}")
+            print(f"DEBUG: New medication: {newMed}")
             result = users.update_one(
                 {"phone": userPhone},
                 {"$push": {"medications": newMed}}
             )
+            print(f"DEBUG: Update result - matched: {result.matched_count}, modified: {result.modified_count}")
             if result.modified_count > 0:
                 return f"Added new medicine: {aidata['medicine_name']} at {aidata['time']} {aidata.get('day', '')}."
             else:
@@ -114,6 +125,8 @@ def commandLogic(userPhone, messageText):
 
 def medTaken(userPhone, position):
     """Handles when a user texts a number to log medication."""
+    # Normalize phone number (remove whatsapp: prefix if present)
+    userPhone = normalize_phone(userPhone)
     stack = medcineLoggingLogic(userPhone)
     medicineLog = None
 
