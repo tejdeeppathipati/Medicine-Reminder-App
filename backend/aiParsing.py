@@ -35,7 +35,7 @@ def aiParseMedicine(message_text):
     )
 #we will be using 40 mini because its better and cheaper and the precision given is 0.2 which will help control any inconsistency and error.  
     try:
-        # FIX: Remove 'await' from this line since OpenAI client is synchronous
+    
         response = ai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
