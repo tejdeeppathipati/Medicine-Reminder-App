@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 
+// API Configuration - use environment variable for production, fallback to localhost for development
+const API_URL = "http://127.0.0.1:5001";
+
 // MRsetup.tsx
 // react for the medicine reminder setup form takes care of user input, medicine, caregiverd, form submission, and alerts
 // sets connection to the api to save user data when form is submitted
@@ -106,9 +109,8 @@ export default function MedicineSetup() {
 
     
     try {
-
       // this should send data to the backend api which then writes to mongodb
-      const response = await fetch("http://127.0.0.1:5000/api/user/setup", {
+      const response = await fetch(`${API_URL}/api/user/setup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dataToSubmit), // data should be json string

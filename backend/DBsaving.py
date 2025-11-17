@@ -1,22 +1,17 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import re
-from pymongo import MongoClient
 from typing import Tuple
+from backend.db import users, db
 
 # DBsaving.py
 # works on creating and updating users based on form submissions. this includes medicine and caregivers.
 # form submissions from the frontend are processed here and checked before being saved to mongodb.
 # we can also change this if additional user data is needed or to include dynamic validation rules.
-
 user_setup_bp = Blueprint('user_setup', __name__)
 
 from flask_cors import CORS
 CORS(user_setup_bp)
-
-client = MongoClient('mongodb://localhost:27017/')
-db = client['medication_reminder']
-users = db['users']
 
 # api routes begin below
 WHATSAPP_PREFIX = "whatsapp:"
@@ -117,13 +112,24 @@ def setup_user():
         'phone': data['phone'],
         'medications': data['medications'],
         'caregivers': data.get('caregivers', []),
-        'created_at': datetime.utcnow()
+        'updated_at': datetime.utcnow()
     }
-    # new user sent to db
-    result = users.insert_one(user_data)
-    print("inserted id:", result.inserted_id) # test
+    # Use update_one with upsert to handle both new and existing users
+    result = users.update_one(
+        {'phone': data['phone']},  # Find by phone number
+        {
+            '$set': user_data,
+            '$setOnInsert': {'created_at': datetime.utcnow()}  # Only set created_at on insert
+        },
+        upsert=True  # Create if doesn't exist, update if exists
+    )
+    # Get the user to return the correct ID
+    user = users.find_one({'phone': data['phone']})
+    mongo_id = str(user['_id']) if user else None
     
-    return jsonify({'success': True, 'user_id': user_id, 'mongo_id': str(result.inserted_id)})
+    print(f"User {'updated' if result.matched_count > 0 else 'created'}: {data['phone']}")
+    
+    return jsonify({'success': True, 'user_id': user_id, 'mongo_id': mongo_id})
 
 # getting user
 @user_setup_bp.route('/api/user/<user_id>', methods=['GET'])

@@ -14,7 +14,7 @@ EASTERN_TZ = timezone('US/Eastern')
 def normalize_phone(phone):
     """Remove 'whatsapp:' prefix if present"""
     if phone and phone.lower().startswith("whatsapp:"):
-        return phone[9:]  # Remove 'whatsapp:' prefix
+        return phone[9:]  
     return phone
 
 def printingStack(stack):
@@ -37,7 +37,7 @@ def commandLogic(userPhone, messageText):
     """
     Handles SMS commands: numeric logs, pause, resume, stop, edit, add.
     """
-    # Normalize phone number (remove whatsapp: prefix if present)
+    # Normalize phone number
     userPhone = normalize_phone(userPhone)
     medLogic = messageText.strip().lower()
 
@@ -125,7 +125,7 @@ def commandLogic(userPhone, messageText):
 
 def medTaken(userPhone, position):
     """Handles when a user texts a number to log medication."""
-    # Normalize phone number (remove whatsapp: prefix if present)
+    # Normalize phone number
     userPhone = normalize_phone(userPhone)
     stack = medcineLoggingLogic(userPhone)
     medicineLog = None
@@ -159,23 +159,6 @@ def medTaken(userPhone, position):
             return f"Logged {medicineLog['medicine_name']}!\n\nAll medications completed."
     else:
         return f"Failed to log {medicineLog['medicine_name']}"
-
-
-# @textD.route('/api/sms/handle', methods=['POST'])
-# def handle_sms():
-#     """Receives SMS from Twilio webhook or curl request."""
-#     data = request.get_json(silent=True) or request.form
-#     user_phone = data.get('From') or data.get('phone')
-#     message_text = data.get('Body') or data.get('message')
-
-#     if not user_phone or not message_text:
-#         return jsonify({'error': 'Missing phone or message'}), 400
-
-#     response = commandLogic(user_phone, message_text)
-#     #twilio_service.send_sms(to=user_phone, body=response)
-#     #return jsonify({'response': response})
-#     twiml = f"<Response><Message>{response}</Message></Response>"
-#     return Response(twiml, mimetype="text/xml")
 
 @textD.route('/api/sms/handle', methods=['POST'])
 def handle_sms():

@@ -7,9 +7,9 @@ from flask_cors import CORS
 # this is set up connecting to localhost for now but can be changed for production
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS so frontend can call API
+CORS(app)  # CORS so frontend can call API
 app.register_blueprint(user_setup_bp)
 
 if __name__ == "__main__":
-    # debug=True lets you see errors in the terminal
+    # debug=True lets us see errors in the terminal
     app.run(host="127.0.0.1", port=5000, debug=True)
