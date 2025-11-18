@@ -56,7 +56,7 @@ def commandLogic(userPhone, messageText):
         return "Reminders resumed successfully. You will continue receiving notifications."
 
 
-    elif medLogic == "stop":
+    elif medLogic == "finish":
         result = users.delete_one({"phone": userPhone})
         if result.deleted_count > 0:
             return "Your account and all your data have been deleted. You will no longer receive reminders. Fill the form again to restart."
