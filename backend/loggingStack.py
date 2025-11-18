@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 import pytz
+import re
 from backend.db import users as users_collection
 from backend.notifications import twilio_service
 
@@ -10,6 +11,32 @@ def normalize_phone(phone):
     if phone and phone.lower().startswith("whatsapp:"):
         return phone[9:] 
     return phone
+
+def normalize_caregiver_phone(phone):
+    """
+    Normalize caregiver phone number for WhatsApp sending.
+    Removes whatsapp: prefix and ensures + is present.
+    send_sms will add whatsapp: prefix back.
+    """
+    if not phone:
+        return phone
+    # Remove whatsapp: prefix if present
+    digits = phone.strip()
+    if digits.lower().startswith("whatsapp:"):
+        digits = digits[9:].strip()
+    # Remove any non-digit characters except +
+    digits_only = re.sub(r'[^\d+]', '', digits)
+    # Ensure it starts with + (send_sms expects this format)
+    if not digits_only.startswith("+"):
+        # Add +1 for US numbers (10 digits) or + for numbers starting with 1
+        if len(digits_only) == 10:
+            digits_only = f"+1{digits_only}"
+        elif digits_only.startswith("1") and len(digits_only) == 11:
+            digits_only = f"+{digits_only}"
+        else:
+            digits_only = f"+{digits_only}" if digits_only else digits_only
+    # Return without whatsapp: prefix - send_sms will add it
+    return digits_only
 
 def medcineLoggingLogic(userPhone, now=None):
     """
@@ -82,9 +109,22 @@ def medcineLoggingLogic(userPhone, now=None):
         for caregiver in caregivers:
             caregiver_phone = caregiver.get('phone')
             if not caregiver_phone:
+                print(f"WARNING: Caregiver {caregiver.get('name', 'Unknown')} has no phone number")
                 continue
-            twilio_service.send_sms(to=caregiver_phone, body=careAlert)
-            print(f"CAREGIVER ALERT to {caregiver.get('name', 'Caregiver')} ({caregiver_phone}): {careAlert}")
+            
+            # Normalize caregiver phone number for WhatsApp
+            normalized_phone = normalize_caregiver_phone(caregiver_phone)
+            
+            # Send message and capture result
+            result = twilio_service.send_sms(to=normalized_phone, body=careAlert)
+            caregiver_name = caregiver.get('name', 'Caregiver')
+            
+            if result.get('status') == 'sent':
+                print(f"✓ CAREGIVER ALERT SENT to {caregiver_name} ({normalized_phone}): {careAlert}")
+            elif result.get('status') == 'error':
+                print(f"✗ CAREGIVER ALERT FAILED to {caregiver_name} ({normalized_phone}): {result.get('error', 'Unknown error')}")
+            else:
+                print(f"CAREGIVER ALERT (mocked) to {caregiver_name} ({normalized_phone}): {careAlert}")
     
     currentMedStack.sort(key=lambda x: x['time'])
     missedMedStack.sort(key=lambda x: x['time'])
