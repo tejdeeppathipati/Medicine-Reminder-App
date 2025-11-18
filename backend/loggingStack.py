@@ -63,7 +63,7 @@ def medcineLoggingLogic(userPhone, now=None):
             med_time = EASTERN_TZ.localize(datetime(now.year, now.month, now.day, hour, minute))
             medTime = EASTERN_TZ.localize(datetime(now.year, now.month, now.day, hour, minute, 0))
 
-            if medTime < (now - timedelta(minutes=30)):
+            if medTime < (now - timedelta(minutes=3)):
                 med["status"] = "missed"
                 missedMedStack.append(med)
             elif medTime <= (now + timedelta(hours=2)):
