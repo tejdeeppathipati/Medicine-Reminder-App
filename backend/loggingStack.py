@@ -112,12 +112,18 @@ def medcineLoggingLogic(userPhone, now=None):
                 print(f"WARNING: Caregiver {caregiver.get('name', 'Unknown')} has no phone number")
                 continue
             
+            # Debug: Print original phone format
+            print(f"DEBUG: Original caregiver phone: '{caregiver_phone}' (type: {type(caregiver_phone)})")
+            
             # Normalize caregiver phone number for WhatsApp
             normalized_phone = normalize_caregiver_phone(caregiver_phone)
+            print(f"DEBUG: Normalized caregiver phone: '{normalized_phone}'")
             
             # Send message and capture result
             result = twilio_service.send_sms(to=normalized_phone, body=careAlert)
             caregiver_name = caregiver.get('name', 'Caregiver')
+            
+            print(f"DEBUG: Twilio result: {result}")
             
             if result.get('status') == 'sent':
                 print(f"✓ CAREGIVER ALERT SENT to {caregiver_name} ({normalized_phone}): {careAlert}")

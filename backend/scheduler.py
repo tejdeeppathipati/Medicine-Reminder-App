@@ -112,6 +112,71 @@ def _build_message(user: Dict[str, Any], med: Dict[str, Any], when: str) -> str:
     )
 
 
+def _check_missed_medications_and_alert_caregivers(app) -> None:
+    """Check for users with 3+ missed medications and alert their caregivers"""
+    with app.app_context():
+        now = datetime.now(DEFAULT_TIMEZONE)
+        today_key = now.strftime("%Y-%m-%d")
+        
+        cursor = users.find({"paused": {"$ne": True}})
+        for user in cursor:
+            phone = user.get("phone")
+            caregivers = user.get("caregivers", [])
+            
+            if not phone or not caregivers:
+                continue
+            
+            # Check if we already alerted caregivers today
+            last_caregiver_alert = user.get("last_caregiver_alert_date")
+            if last_caregiver_alert == today_key:
+                continue
+            
+            # Count missed medications
+            missed_count = 0
+            missed_meds = []
+            tz = _get_timezone(user.get("timezone"))
+            
+            for med in user.get("medications", []):
+                status = med.get("status", "pending")
+                for time_str in med.get("times", []):
+                    med_dt = _parse_med_time(now, time_str, tz)
+                    if not med_dt:
+                        continue
+                    
+                    # If more than 3 minutes past med time and still pending, it's missed
+                    if now > (med_dt + timedelta(minutes=3)) and status == "pending":
+                        missed_count += 1
+                        missed_meds.append(f"{med.get('name')} ({time_str})")
+            
+            # Alert caregivers if 3+ meds missed
+            if missed_count >= 3:
+                user_name = user.get("name", "The user")
+                alert_message = (
+                    f"Alert: {user_name} has missed {missed_count} medications: "
+                    f"{', '.join(missed_meds)}. Please check on them."
+                )
+                
+                for caregiver in caregivers:
+                    caregiver_phone = caregiver.get("phone")
+                    if not caregiver_phone:
+                        continue
+                    
+                    result = twilio_service.send_sms(to=caregiver_phone, body=alert_message)
+                    app.logger.info(
+                        "Caregiver alert for %s to %s (%s) -> %s",
+                        phone,
+                        caregiver.get("name", "Caregiver"),
+                        caregiver_phone,
+                        result.get("status"),
+                    )
+                
+                # Mark that we alerted caregivers today
+                users.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"last_caregiver_alert_date": today_key}}
+                )
+
+
 def _dispatch_due_reminders(app) -> None:
     with app.app_context():
         now = datetime.now(DEFAULT_TIMEZONE)
@@ -158,3 +223,6 @@ def _dispatch_due_reminders(app) -> None:
 
             if updated:
                 users.update_one({"_id": user["_id"]}, {"$set": {"medications": meds}})
+        
+        # After sending reminders, check for missed meds and alert caregivers
+        _check_missed_medications_and_alert_caregivers(app)

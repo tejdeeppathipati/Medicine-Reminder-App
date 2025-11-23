@@ -7,10 +7,7 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "medication-reminder")
 
 # Configure SSL for MongoDB Atlas connections
 if "mongodb.net" in MONGO_URI or "mongodb+srv" in MONGO_URI:
-    client = MongoClient(
-        MONGO_URI,
-        tlsCAFile=certifi.where()
-    )
+    client = MongoClient(MONGO_URI)
 else:
     client = MongoClient(MONGO_URI)
 
