@@ -5,6 +5,22 @@ from backend.db import users as users_collection
 from backend.notifications import twilio_service
 
 EASTERN_TZ = pytz.timezone('America/New_York')
+WEEKDAY_ALIASES = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
 
 def normalize_phone(phone):
     """Remove 'whatsapp:' prefix if present"""
@@ -38,6 +54,25 @@ def normalize_caregiver_phone(phone):
     # Return without whatsapp: prefix - send_sms will add it
     return digits_only
 
+def med_is_scheduled_today(med, now):
+    frequency = (med.get("frequency") or "Daily").strip().lower()
+    if frequency in {"as needed", "as_needed", "as-needed", "prn"}:
+        return False
+    if frequency != "weekly":
+        return True
+
+    days = med.get("days") or []
+    if isinstance(days, str):
+        days = [days]
+    if not days:
+        return True
+
+    return any(WEEKDAY_ALIASES.get(str(day).strip().lower()) == now.weekday() for day in days)
+
+def caregiver_wants_missed_alert(caregiver):
+    notify_when = (caregiver.get("notify_when") or "On missed dose").strip().lower()
+    return notify_when in {"on missed dose", "both"}
+
 def medcineLoggingLogic(userPhone, now=None):
     """
     this is creating a priorritized med stack which 
@@ -54,8 +89,12 @@ def medcineLoggingLogic(userPhone, now=None):
     
     caregivers = user.get('caregivers', [])
     
+    now = now or datetime.now(EASTERN_TZ)
     stackMed = []
     for med in user.get('medications', []):
+        if not med_is_scheduled_today(med, now):
+            continue
+
         status = med.get('status', 'pending') 
         print(f" {med['name']} at {med['times']} - status: {status}")
  
@@ -78,7 +117,6 @@ def medcineLoggingLogic(userPhone, now=None):
     missedMedStack = []
     pendedMedStack = []
 
-    now = now or datetime.now(EASTERN_TZ)
     print(f" CURRENT TIME: {now}")
     print(f" ALL MEDICATIONS: {user.get('medications', [])}")
     
@@ -107,6 +145,9 @@ def medcineLoggingLogic(userPhone, now=None):
         careAlert = f"Alert: {user_name} has missed {len(missedMedStack)} medications: {', '.join(careMed)}. Please check on them."
         
         for caregiver in caregivers:
+            if not caregiver_wants_missed_alert(caregiver):
+                continue
+
             caregiver_phone = caregiver.get('phone')
             if not caregiver_phone:
                 print(f"WARNING: Caregiver {caregiver.get('name', 'Unknown')} has no phone number")

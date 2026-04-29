@@ -14,6 +14,23 @@ from backend.notifications import twilio_service
 DEFAULT_TZ = os.getenv("DEFAULT_TIMEZONE", "US/Eastern")
 REMINDER_POLL_MINUTES = int(os.getenv("REMINDER_POLL_MINUTES", "1"))
 REMINDER_WINDOW_MINUTES = int(os.getenv("REMINDER_WINDOW_MINUTES", "5"))
+DAILY_SUMMARY_HOUR = int(os.getenv("CAREGIVER_DAILY_SUMMARY_HOUR", "20"))
+WEEKDAY_ALIASES = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
 
 try:
     DEFAULT_TIMEZONE = pytz.timezone(DEFAULT_TZ)
@@ -102,6 +119,45 @@ def _parse_med_time(now: datetime, time_str: str, tz: pytz.timezone) -> Optional
         return None
 
 
+def _normalise_frequency(med: Dict[str, Any]) -> str:
+    frequency = (med.get("frequency") or "Daily").strip().lower()
+    if frequency in {"twice daily", "twice_daily", "twice-daily"}:
+        return "twice daily"
+    if frequency == "weekly":
+        return "weekly"
+    if frequency in {"as needed", "as_needed", "as-needed", "prn"}:
+        return "as needed"
+    return "daily"
+
+
+def _med_is_scheduled_today(med: Dict[str, Any], now: datetime) -> bool:
+    frequency = _normalise_frequency(med)
+    if frequency == "as needed":
+        return False
+    if frequency != "weekly":
+        return True
+
+    days = med.get("days") or []
+    if isinstance(days, str):
+        days = [days]
+    if not days:
+        return True
+
+    today = now.weekday()
+    return any(WEEKDAY_ALIASES.get(str(day).strip().lower()) == today for day in days)
+
+
+def _caregiver_wants(caregiver: Dict[str, Any], kind: str) -> bool:
+    notify_when = (caregiver.get("notify_when") or "On missed dose").strip().lower()
+    if notify_when == "both":
+        return True
+    if kind == "missed_dose":
+        return notify_when == "on missed dose"
+    if kind == "daily_summary":
+        return notify_when == "daily summary"
+    return False
+
+
 def _build_message(user: Dict[str, Any], med: Dict[str, Any], when: str) -> str:
     name = user.get("name", "there")
     dosage = med.get("dosage", "").strip()
@@ -113,7 +169,7 @@ def _build_message(user: Dict[str, Any], med: Dict[str, Any], when: str) -> str:
 
 
 def _check_missed_medications_and_alert_caregivers(app) -> None:
-    """Check for users with 3+ missed medications and alert their caregivers"""
+    """Check for missed medications and alert caregivers based on their preference."""
     with app.app_context():
         now = datetime.now(DEFAULT_TIMEZONE)
         today_key = now.strftime("%Y-%m-%d")
@@ -126,10 +182,7 @@ def _check_missed_medications_and_alert_caregivers(app) -> None:
             if not phone or not caregivers:
                 continue
             
-            # Check if we already alerted caregivers today
-            last_caregiver_alert = user.get("last_caregiver_alert_date")
-            if last_caregiver_alert == today_key:
-                continue
+            caregiver_alert_log = user.get("caregiver_alert_log", {})
             
             # Count missed medications
             missed_count = 0
@@ -137,6 +190,9 @@ def _check_missed_medications_and_alert_caregivers(app) -> None:
             tz = _get_timezone(user.get("timezone"))
             
             for med in user.get("medications", []):
+                if not _med_is_scheduled_today(med, now):
+                    continue
+
                 status = med.get("status", "pending")
                 for time_str in med.get("times", []):
                     med_dt = _parse_med_time(now, time_str, tz)
@@ -148,33 +204,68 @@ def _check_missed_medications_and_alert_caregivers(app) -> None:
                         missed_count += 1
                         missed_meds.append(f"{med.get('name')} ({time_str})")
             
-            # Alert caregivers if 3+ meds missed
-            if missed_count >= 3:
-                user_name = user.get("name", "The user")
-                alert_message = (
-                    f"Alert: {user_name} has missed {missed_count} medications: "
-                    f"{', '.join(missed_meds)}. Please check on them."
-                )
-                
+            if missed_count == 0:
+                continue
+
+            user_name = user.get("name", "The user")
+            updates: Dict[str, Any] = {}
+
+            alert_message = (
+                f"Alert: {user_name} missed {missed_count} medication"
+                f"{'s' if missed_count != 1 else ''}: {', '.join(missed_meds)}. "
+                "Please check on them."
+            )
+            if caregiver_alert_log.get("missed_dose") != today_key:
+                sent_any = False
                 for caregiver in caregivers:
+                    if not _caregiver_wants(caregiver, "missed_dose"):
+                        continue
                     caregiver_phone = caregiver.get("phone")
                     if not caregiver_phone:
                         continue
-                    
+
                     result = twilio_service.send_sms(to=caregiver_phone, body=alert_message)
+                    sent_any = True
                     app.logger.info(
-                        "Caregiver alert for %s to %s (%s) -> %s",
+                        "Missed-dose caregiver alert for %s to %s (%s) -> %s",
                         phone,
                         caregiver.get("name", "Caregiver"),
                         caregiver_phone,
                         result.get("status"),
                     )
-                
-                # Mark that we alerted caregivers today
-                users.update_one(
-                    {"_id": user["_id"]},
-                    {"$set": {"last_caregiver_alert_date": today_key}}
-                )
+
+                if sent_any:
+                    updates["caregiver_alert_log.missed_dose"] = today_key
+
+            summary_due = now.hour >= DAILY_SUMMARY_HOUR
+            summary_message = (
+                f"Daily summary: {user_name} missed {missed_count} medication"
+                f"{'s' if missed_count != 1 else ''} today: {', '.join(missed_meds)}."
+            )
+            if summary_due and caregiver_alert_log.get("daily_summary") != today_key:
+                sent_any = False
+                for caregiver in caregivers:
+                    if not _caregiver_wants(caregiver, "daily_summary"):
+                        continue
+                    caregiver_phone = caregiver.get("phone")
+                    if not caregiver_phone:
+                        continue
+
+                    result = twilio_service.send_sms(to=caregiver_phone, body=summary_message)
+                    sent_any = True
+                    app.logger.info(
+                        "Daily caregiver summary for %s to %s (%s) -> %s",
+                        phone,
+                        caregiver.get("name", "Caregiver"),
+                        caregiver_phone,
+                        result.get("status"),
+                    )
+
+                if sent_any:
+                    updates["caregiver_alert_log.daily_summary"] = today_key
+
+            if updates:
+                users.update_one({"_id": user["_id"]}, {"$set": updates})
 
 
 def _dispatch_due_reminders(app) -> None:
@@ -195,6 +286,9 @@ def _dispatch_due_reminders(app) -> None:
             tz = _get_timezone(user.get("timezone"))
 
             for med in meds:
+                if not _med_is_scheduled_today(med, now):
+                    continue
+
                 reminder_log: Dict[str, Any] = med.get("reminder_log", {})
                 for time_str in med.get("times", []):
                     med_dt = _parse_med_time(now, time_str, tz)

@@ -1,18 +1,17 @@
-import React, { useState } from "react";
+import { useState, type FormEvent } from "react";
 
-// API Configuration - use environment variable for production, fallback to localhost for development
-const API_URL = "http://127.0.0.1:5001";
-
-// MRsetup.tsx
-// react for the medicine reminder setup form takes care of user input, medicine, caregiverd, form submission, and alerts
-// sets connection to the api to save user data when form is submitted
-// logic includes adding and removing medicines or caregivers and displaying success/error messages when the form is submitted.
-// tailwind css gives a cleaner look for the users
+const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5001";
+const FREQS = ["Daily", "Twice daily", "Weekly", "As needed"];
+const NOTIFY_OPTIONS = ["On missed dose", "Daily summary", "Both"];
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 interface Medicine {
   name: string;
   dosage: string;
   time: string;
+  secondTime: string;
+  frequency: string;
+  weeklyDay: string;
 }
 
 interface Caregiver {
@@ -20,306 +19,715 @@ interface Caregiver {
   phone: string;
 }
 
-interface Alert { // needed interface to tell if the form submissions are working or not.
-  type: "success" | "error";
-  message: string;
-}
+const emptyMedicine = (): Medicine => ({
+  name: "",
+  dosage: "",
+  time: "",
+  secondTime: "",
+  frequency: FREQS[0],
+  weeklyDay: WEEKDAYS[0],
+});
 
 export default function MedicineSetup() {
-  const [medicines, setMedicines] = useState<Medicine[]>([ // list for medicines
-    { name: "", dosage: "", time: "" },
-  ]);
-  const [caregivers, setCaregivers] = useState<Caregiver[]>([ // list for caregivers
-    { name: "", phone: "" },
-  ]);
-  const [userInfo, setUserInfo] = useState({ name: "", phone: "" });
-  const [alert, setAlert] = useState<Alert | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false); //
+  const [patient, setPatient] = useState({ name: "", phone: "" });
+  const [medicines, setMedicines] = useState<Medicine[]>([emptyMedicine()]);
+  const [caregiver, setCaregiver] = useState<Caregiver>({ name: "", phone: "" });
+  const [notifyWhen, setNotifyWhen] = useState(NOTIFY_OPTIONS[0]);
+  const [toast, setToast] = useState("");
+  const [toastVisible, setToastVisible] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleMedicineChange = ( // function to update one medicine
+  const showToast = (message: string) => {
+    setToast(message);
+    setToastVisible(true);
+    window.setTimeout(() => setToastVisible(false), 2600);
+  };
+
+  const updateMedicine = (
     index: number,
     field: keyof Medicine,
     value: string
   ) => {
-    const newMeds = [...medicines];
-    newMeds[index][field] = value;
-    setMedicines(newMeds);
-  };
-
-  const handleCaregiverChange = ( // function to update one caregiver
-    index: number,
-    field: keyof Caregiver,
-    value: string
-  ) => {
-    const newCaregivers = [...caregivers];
-    newCaregivers[index][field] = value;
-    setCaregivers(newCaregivers);
-  };
-
-  const addMedicine = () => { // function for new empty medicine
-    setMedicines([...medicines, { name: "", dosage: "", time: "" }]);
-  };
-
-  const removeMedicine = (index: number) => { // function to remove one medicine. should not allow no medicines to show
-    if (medicines.length > 1) {
-      setMedicines(medicines.filter((_, i) => i !== index));
-    }
-  };
-
-  const addCaregiver = () => { // function for new empty caregiver
-    setCaregivers([...caregivers, { name: "", phone: "" }]);
-  };
-
-  const removeCaregiver = (index: number) => { // function for to remove one caergiver, should allow removal of all
-    setCaregivers(caregivers.filter((_, i) => i !== index));
-  };
-
-  // all submission handling below. form functionality relies on this most importantly
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
-    if (!userInfo.name || !userInfo.phone) {
-      setAlert({ type: "error", message: "Please fill out all user fields." });
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (medicines.some((m) => !m.name || !m.dosage || !m.time)) {
-      setAlert({ type: "error", message: "Please add at least one medicine." });
-      setIsSubmitting(false);
-      return;
-    }
-
-    const validCaregivers = caregivers.filter(
-      (cg) => cg.name.trim() && cg.phone.trim()
+    setMedicines((current) =>
+      current.map((medicine, medicineIndex) =>
+        medicineIndex === index ? { ...medicine, [field]: value } : medicine
+      )
     );
+  };
 
-// actual data being extracted from the form this is what preps json for the api
+  const addMedicine = () => {
+    setMedicines((current) => [...current, emptyMedicine()]);
+  };
+
+  const removeMedicine = (index: number) => {
+    setMedicines((current) =>
+      current.filter((_, medicineIndex) => medicineIndex !== index)
+    );
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!patient.name.trim() || !patient.phone.trim()) {
+      showToast("Add the patient name and phone");
+      return;
+    }
+
+    if (medicines.length === 0) {
+      showToast("Add at least one medicine");
+      return;
+    }
+
+    const incompleteMedicine = medicines.some((medicine) => {
+      if (!medicine.name.trim() || !medicine.dosage.trim()) {
+        return true;
+      }
+      if (medicine.frequency === "As needed") {
+        return false;
+      }
+      if (!medicine.time.trim()) {
+        return true;
+      }
+      return medicine.frequency === "Twice daily" && !medicine.secondTime.trim();
+    });
+
+    if (incompleteMedicine) {
+      showToast("Complete each medicine schedule");
+      return;
+    }
+
+    if (
+      (caregiver.name.trim() && !caregiver.phone.trim()) ||
+      (!caregiver.name.trim() && caregiver.phone.trim())
+    ) {
+      showToast("Complete caregiver details");
+      return;
+    }
+
     const dataToSubmit = {
-      name: userInfo.name.trim(),
-      phone: userInfo.phone.trim(),
-      medications: medicines.map((med) => ({
-        name: med.name.trim(),
-        dosage: med.dosage.trim(),
-        time: med.time.trim(),
+      name: patient.name.trim(),
+      phone: patient.phone.trim(),
+      medications: medicines.map((medicine) => ({
+        name: medicine.name.trim(),
+        dosage: medicine.dosage.trim(),
+        times:
+          medicine.frequency === "As needed"
+            ? []
+            : [
+                medicine.time.trim(),
+                ...(medicine.frequency === "Twice daily"
+                  ? [medicine.secondTime.trim()]
+                  : []),
+              ],
+        frequency: medicine.frequency,
+        days: medicine.frequency === "Weekly" ? [medicine.weeklyDay] : [],
       })),
-      caregivers: validCaregivers,
+      caregivers:
+        caregiver.name.trim() && caregiver.phone.trim()
+          ? [
+              {
+                name: caregiver.name.trim(),
+                phone: caregiver.phone.trim(),
+                notify_when: notifyWhen,
+              },
+            ]
+          : [],
     };
 
-    
+    setIsSubmitting(true);
+
     try {
-      // this should send data to the backend api which then writes to mongodb
       const response = await fetch(`${API_URL}/api/user/setup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(dataToSubmit), // data should be json string
+        body: JSON.stringify(dataToSubmit),
       });
-
-    
       const result = await response.json();
 
-      if (response.ok) {
-        setAlert({ type: "success", message: "Setup complete! You will now receive SMS reminders." });
-        setTimeout(() => {
-          setUserInfo({ name: "", phone: "" });
-          setMedicines([{ name: "", dosage: "", time: "" }]);
-          setCaregivers([{ name: "", phone: "" }]);
-          setAlert(null);
-        }, 5000);
-
-      } else { // error messages, two types depending on failed submissions
-        setAlert({ type: "error", message: result.error || "Setup failed. Try again." });
+      if (response.ok && result.success) {
+        showToast("Reminders saved");
+        setPatient({ name: "", phone: "" });
+        setMedicines([emptyMedicine()]);
+        setCaregiver({ name: "", phone: "" });
+        setNotifyWhen(NOTIFY_OPTIONS[0]);
+      } else {
+        showToast(result.error || "Could not save reminders");
       }
-    } catch (error) {
-      setAlert({ type: "error", message: "Error. Check your connection." });
+    } catch {
+      showToast("Could not reach the reminder API");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-
-  // appearance changes (JSX)
   return (
-    // big page container with light grey background and same padding for cleaner look, simple for target audience
-    <div className = "min-h-screen bg-gray-100 py-8 px-4">
-      
-      {/* main content. using a rounded box elevates the page and looks cleaner, white contrasts the background */}
-      <div className = "max-w-2xl mx-auto bg-white rounded-lg shadow p-6">
-        
-        {/* title text should be bigger and more prominent than the rest of the form */}
-        <h1 className = "text-3xl font-bold text-gray-900 mb-2">
-          Medicine Reminder Setup
-        </h1>
-        {/* description for rhe form, simple and to the point for the user */}
-        <p className = "text-gray-600 mb-6">
-          Set up your medicine reminders and add optional caregivers
+    <>
+      <style>{styles}</style>
+      <form className="page" onSubmit={handleSubmit}>
+        <div className="eyebrow">Med Remind</div>
+        <h1>Set up reminders</h1>
+        <p className="subtitle">
+          Takes under two minutes. Everything can be edited later.
         </p>
 
-        {/* alerts show up at the top of the form if set up was successful or not */}
-        {alert && (
-          <div
-            className = {`p-3 mb-4 rounded ${
-              // if/else for background color (red for failure and green for success)
-              alert.type === "success" ? "bg-green-300 text-green-800" : "bg-red-300 text-red-900" 
-            }`}
-          >
-            {alert.message}
-          </div>
-        )}
-
-        {/* form container inside the background. this part handles user entered submissions (ensure space between section for better appearance */}
-        <form onSubmit = {handleSubmit} className = "space-y-6">
-          <div>
-            {/* all user info go here. this is a heading and should be bolder than the text below. */}
-            <h2 className = "text-lg font-semibold text-gray-900 mb-3">
-              Your Information
-            </h2>
-            <div className = "space-y-3">
-              {/* box for user to input name */}
+        <section className="sec">
+          <div className="sec-label">Who's taking this?</div>
+          <div className="row r2">
+            <Field label="Full name" htmlFor="p-name">
               <input
-                value = {userInfo.name}
-                onChange={(e) => setUserInfo({ ...userInfo, name: e.target.value })} // updates user name when changed
-                placeholder = "Your Name"
-                className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                id="p-name"
+                type="text"
+                placeholder="Jane Smith"
+                autoComplete="name"
+                value={patient.name}
+                onChange={(event) =>
+                  setPatient({ ...patient, name: event.target.value })
+                }
               />
-              {/* box for phone number input */}
+            </Field>
+            <Field label="Phone number" htmlFor="p-phone">
               <input
-                value = {userInfo.phone}
-                onChange = {(e) => setUserInfo({ ...userInfo, phone: e.target.value })} // updates phone number when changed
-                placeholder = "Phone Number" // tells user what to put here. appears until information is typed
-                className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                // purple rings appears on all text boxes when they are clicked and being typed in
+                id="p-phone"
+                type="tel"
+                placeholder="+1 555 123 4567"
+                autoComplete="tel"
+                value={patient.phone}
+                onChange={(event) =>
+                  setPatient({ ...patient, phone: event.target.value })
+                }
               />
-            </div>
+            </Field>
           </div>
+        </section>
 
-          <div>
-            {/* medicine section, another heading and should be bolder than the rest of the text. holds the medicine, dosage, and time */}
-            <h2 className = "text-lg font-semibold text-gray-900 mb-3">
-              Medicines
-            </h2>
-            <div className = "space-y-3">
-              {/* medicine array, loop through and create an item for each added */}
-              {medicines.map((med, index) => (
-                <div key = {index} className = "p-3 border border-gray-300 rounded bg-gray-50"> 
-                {/* this and the caregivers sections rounded box within the form with slight color difference for added contrast, looks better for the user */}
-                  <div className = "flex justify-between items-center mb-2">
-                    <span className = "text-sm font-medium text-gray-700">
-                      Medicine {index + 1}
-                    </span>
-                    {/* the remove button only appears if more than one medicine is entered, this should appear on all medicines
-                    a user should not be allowed to remove medicine if it is the only one logged */}
-                    {medicines.length > 1 && (
-                      <button
-                        type = "button"
-                        onClick = {() => removeMedicine(index)}
-                        className = "text-black-600 text-sm hover:text-black-800 underline"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <div className = "space-y-2">
-                    {/* medicine name input button */}
-                    <input
-                      value = {med.name}
-                      onChange = {(e) => handleMedicineChange(index, "name", e.target.value)}
-                      placeholder = "Medicine Name"
-                      className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                    {/* medicine dosage input */}
-                    <input
-                       value = {med.dosage}
-                       onChange = {(e) => handleMedicineChange(index, "dosage", e.target.value)}
-                       placeholder = "Dosage"
-                       className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                    {/* input space for the time reminder should be sent */}
-                    <input
-                      value = {med.time}
-                      onChange = {(e) => handleMedicineChange(index, "time", e.target.value)}
-                      placeholder = "Time (ex: 8:00 AM, 2:30 PM)"
-                      className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                  </div>
+        <section className="sec">
+          <div className="sec-label">Medicines</div>
+          <div className="med-list">
+            {medicines.map((medicine, index) => (
+              <div className="med-entry" key={index}>
+                <div className="med-entry-head">
+                  <span className="med-num">Medicine {index + 1}</span>
+                  <button
+                    type="button"
+                    className="med-remove"
+                    onClick={() => removeMedicine(index)}
+                    aria-label={`Remove medicine ${index + 1}`}
+                  >
+                    remove
+                  </button>
                 </div>
-              ))}
-              {/* this button should allow a user to add more medicine to receive more reminders. */}
-              <button
-                type = "button"
-                onClick = {addMedicine}
-                className = "w-full py-2 px-4 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-              >
-                Add More Medicine
-              </button>
-            </div>
-          </div>
-
-          <div>
-            {/* caregivers section: the heading should be bold and clear that this section is optional, description should be below it for clarity */}
-            <h2 className = "text-lg font-semibold text-gray-900 mb-3">
-              Caregivers (Optional)
-            </h2>
-            <p className = "text-sm text-gray-600 mb-3">
-              Your caregivers will be notified if you miss several reminders
-            </p>
-            <div className = "space-y-3">
-              {/* caregivers array: loop through if a user decides to add a caregiver */}
-              {caregivers.map((caregiver, index) => (
-                <div key = {index} className = "p-3 border border-gray-300 rounded bg-gray-50">
-                  <div className = "flex justify-between items-center mb-2">
-                    <span className = "text-sm font-medium text-gray-700">
-                      Caregiver {index + 1}
-                    </span>
-                    {/* remove caregiver button, similar to remove medicine except a user can remove all caregivers if none needed */}
+                <div className="row r3">
+                  <Field label="Name" htmlFor={`mname-${index}`}>
+                    <input
+                      id={`mname-${index}`}
+                      type="text"
+                      placeholder="e.g. Metformin"
+                      value={medicine.name}
+                      onChange={(event) =>
+                        updateMedicine(index, "name", event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Dosage" htmlFor={`mdose-${index}`}>
+                    <input
+                      id={`mdose-${index}`}
+                      type="text"
+                      placeholder="500 mg"
+                      value={medicine.dosage}
+                      onChange={(event) =>
+                        updateMedicine(index, "dosage", event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Remind at" htmlFor={`mtime-${index}`}>
+                    <input
+                      id={`mtime-${index}`}
+                      type="time"
+                      disabled={medicine.frequency === "As needed"}
+                      value={medicine.time}
+                      onChange={(event) =>
+                        updateMedicine(index, "time", event.target.value)
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="freq-label">Frequency</div>
+                <div className="chip-row">
+                  {FREQS.map((freq) => (
                     <button
                       type="button"
-                      onClick={() => removeCaregiver(index)}
-                      className = "text-black-600 text-sm underline hover:text-black-800"
+                      key={freq}
+                      className={`chip ${
+                        medicine.frequency === freq ? "active" : ""
+                      }`}
+                      onClick={() => updateMedicine(index, "frequency", freq)}
                     >
-                      Remove
+                      {freq}
                     </button>
-                  </div>
-                  <div className = "space-y-2">
-                    {/* caregiver name input, placeholder tells user what to put here */}
-                    <input
-                      value = {caregiver.name}
-                      onChange = {(e) => handleCaregiverChange(index, "name", e.target.value)}
-                      placeholder = "Caregiver Name"
-                      className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                    {/* caregive phone number goes here */}
-                    <input
-                      value = {caregiver.phone}
-                      onChange = {(e) => handleCaregiverChange(index, "phone", e.target.value)}
-                      placeholder = "Caregiver Phone Number"
-                      className = "w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    /> 
-                  </div>
+                  ))}
                 </div>
-              ))}
-              {/* button to add caregiver */}
-              <button
-                type = "button"
-                onClick = {addCaregiver}
-                className = "w-full py-2 px-4 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-              >
-                Add Caregiver
-              </button>
-            </div>
+                {medicine.frequency === "Twice daily" && (
+                  <div className="row r2 schedule-extra">
+                    <Field label="Second reminder" htmlFor={`msecond-${index}`}>
+                      <input
+                        id={`msecond-${index}`}
+                        type="time"
+                        value={medicine.secondTime}
+                        onChange={(event) =>
+                          updateMedicine(index, "secondTime", event.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+                )}
+                {medicine.frequency === "Weekly" && (
+                  <>
+                    <div className="freq-label">Reminder day</div>
+                    <div className="chip-row">
+                      {WEEKDAYS.map((day) => (
+                        <button
+                          type="button"
+                          key={day}
+                          className={`chip ${
+                            medicine.weeklyDay === day ? "active" : ""
+                          }`}
+                          onClick={() => updateMedicine(index, "weeklyDay", day)}
+                        >
+                          {day}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {medicine.frequency === "As needed" && (
+                  <p className="schedule-note">
+                    No automatic reminders will be sent for this medicine.
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
 
-          {/* submit button, different color than all buttons on the form (important for clarity and distinction) */}
           <button
-            type = "submit"
-            disabled = {isSubmitting} // button should be disabled when form is submitting to prevent issues
-            className = "w-full py-3 px-6 bg-purple-800 text-white rounded font-semibold hover:bg-purple-900 disabled:bg-gray-400"
+            type="button"
+            className="add-row"
+            onClick={addMedicine}
+            aria-label="Add another medicine"
           >
-            {/* conditional text for the save button */}
-            {isSubmitting ? "Working.. please wait." : "Save"}
+            <span className="add-icon" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path
+                  d="M6 1v10M1 6h10"
+                  stroke="#9B9890"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="add-text">Add another medicine</span>
           </button>
-        </form>
-      </div>
+        </section>
+
+        <section className="sec">
+          <div className="sec-label">
+            Caregiver <span>optional</span>
+          </div>
+          <div className="row r2">
+            <Field label="Caregiver name" htmlFor="cg-name">
+              <input
+                id="cg-name"
+                type="text"
+                placeholder="Robert Smith"
+                autoComplete="name"
+                value={caregiver.name}
+                onChange={(event) =>
+                  setCaregiver({ ...caregiver, name: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Their phone" htmlFor="cg-phone">
+              <input
+                id="cg-phone"
+                type="tel"
+                placeholder="+1 555 987 6543"
+                autoComplete="tel"
+                value={caregiver.phone}
+                onChange={(event) =>
+                  setCaregiver({ ...caregiver, phone: event.target.value })
+                }
+              />
+            </Field>
+          </div>
+          <div className="cg-notify-label">When to notify them</div>
+          <div className="chip-row">
+            {NOTIFY_OPTIONS.map((option) => (
+              <button
+                type="button"
+                key={option}
+                className={`chip ${notifyWhen === option ? "active" : ""}`}
+                onClick={() => setNotifyWhen(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <div className="save-wrap">
+          <button className="save-btn" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Saving..." : "Save reminders"}
+          </button>
+          <p className="save-note">
+            Reminders are sent via SMS to the phone number above.
+          </p>
+        </div>
+      </form>
+
+      <div className={`toast ${toastVisible ? "show" : ""}`}>{toast}</div>
+    </>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor={htmlFor}>{label}</label>
+      {children}
     </div>
-)};
+  );
+}
+
+const styles = `
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg:       #F8F7F4;
+  --surface:  #FFFFFF;
+  --border:   #E5E3DE;
+  --border2:  #D0CEC8;
+  --text:     #18180F;
+  --muted:    #9B9890;
+  --hint:     #C2C0BA;
+  --accent:   #18180F;
+  --chip-sel-bg: #18180F;
+  --chip-sel-fg: #FFFFFF;
+  --danger:   #C94040;
+  --r-md:     8px;
+  --r-lg:     12px;
+  --max:      580px;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 0 16px 100px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.page {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding-top: clamp(32px, 6vw, 56px);
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+h1 {
+  font-size: clamp(26px, 5vw, 34px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.3px;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--muted);
+  margin-bottom: 44px;
+}
+
+.sec { margin-bottom: 40px; }
+
+.sec-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: 12px;
+  border-bottom: 0.5px solid var(--border);
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sec-label span {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  color: var(--hint);
+}
+
+.row {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.r2 { grid-template-columns: 1fr 1fr; }
+.r3 { grid-template-columns: 2fr 1fr 1.1fr; }
+
+@media (max-width: 480px) {
+  .r2 { grid-template-columns: 1fr; }
+  .r3 { grid-template-columns: 1fr; }
+}
+
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 13px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--r-md);
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+  -webkit-appearance: none;
+}
+
+.field input::placeholder { color: var(--hint); }
+.field input:focus { border-color: var(--border2); }
+.field input:disabled {
+  color: var(--hint);
+  background: #FBFAF8;
+  cursor: not-allowed;
+}
+input[type="time"] { cursor: pointer; }
+
+.med-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.med-entry {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+  position: relative;
+  transition: border-color 0.15s, opacity 0.2s;
+}
+
+.med-entry:focus-within { border-color: var(--border2); }
+
+.med-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.med-num {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--hint);
+}
+
+.med-remove {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--hint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  padding: 2px 0;
+  transition: color 0.15s;
+  line-height: 1;
+}
+
+.med-remove:hover { color: var(--danger); }
+
+.freq-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  margin-top: 14px;
+}
+
+.schedule-extra {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.schedule-note {
+  font-size: 12px;
+  color: var(--hint);
+  margin-top: 10px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chip {
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 6px 13px;
+  border-radius: 100px;
+  border: 0.5px solid var(--border2);
+  color: var(--muted);
+  background: none;
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.chip:hover {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.chip.active {
+  background: var(--chip-sel-bg);
+  color: var(--chip-sel-fg);
+  border-color: var(--chip-sel-bg);
+}
+
+.add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 2px;
+  cursor: pointer;
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  font-family: 'Outfit', sans-serif;
+}
+
+.add-row:hover .add-icon { background: var(--border2); }
+.add-row:hover .add-text { color: var(--text); }
+
+.add-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.add-icon svg { display: block; }
+
+.add-text {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+  transition: color 0.15s;
+}
+
+.cg-notify-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+
+.save-wrap { margin-top: 8px; }
+
+.save-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--text);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-lg);
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.save-btn:hover { opacity: 0.88; }
+.save-btn:active { transform: scale(0.995); }
+.save-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.save-note {
+  font-size: 12px;
+  color: var(--hint);
+  text-align: center;
+  margin-top: 10px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--text);
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  padding: 11px 22px;
+  border-radius: 100px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  white-space: nowrap;
+  z-index: 999;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+`;

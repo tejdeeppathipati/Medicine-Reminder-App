@@ -89,7 +89,9 @@ def commandLogic(userPhone, messageText):
                 {
                     "$set": {
                         "medications.$.times": [aidata['time']],
-                        "medications.$.day": aidata.get('day', "")
+                        "medications.$.day": aidata.get('day', ""),
+                        "medications.$.frequency": "Daily",
+                        "medications.$.days": []
                     }
                 }
             )
@@ -104,6 +106,8 @@ def commandLogic(userPhone, messageText):
                 "name": aidata['medicine_name'],
                 "times": [aidata['time']],
                 "day": aidata.get('day', ""),
+                "frequency": "Daily",
+                "days": [],
                 "status": "pending"
             }
             print(f"DEBUG: Trying to add medicine for phone: {userPhone}")
@@ -178,4 +182,3 @@ def handle_sms():
     response_text = commandLogic(user_phone, message_text)
     twiml = f"<Response><Message>{response_text}</Message></Response>"
     return Response(twiml, mimetype="text/xml")
-

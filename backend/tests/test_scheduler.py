@@ -9,6 +9,8 @@ from backend.scheduler import (
     _parse_med_time,
     _build_message,
     _get_timezone,
+    _med_is_scheduled_today,
+    _caregiver_wants,
     DEFAULT_TIMEZONE,
 )
 
@@ -64,6 +66,31 @@ class TestScheduler(unittest.TestCase):
     def test_get_timezone_invalid_falls_back_to_default(self):
         result = _get_timezone("Not/ARealZone")
         self.assertEqual(result, DEFAULT_TIMEZONE)
+
+    def test_daily_med_is_scheduled_every_day(self):
+        self.assertTrue(_med_is_scheduled_today({"frequency": "Daily"}, self.now))
+
+    def test_twice_daily_med_is_scheduled_every_day(self):
+        self.assertTrue(_med_is_scheduled_today({"frequency": "Twice daily"}, self.now))
+
+    def test_as_needed_med_is_not_scheduled(self):
+        self.assertFalse(_med_is_scheduled_today({"frequency": "As needed"}, self.now))
+
+    def test_weekly_med_only_schedules_on_selected_day(self):
+        sunday = self.tz.localize(datetime(2025, 11, 16, 9, 0, 0))
+        self.assertTrue(
+            _med_is_scheduled_today({"frequency": "Weekly", "days": ["Sun"]}, sunday)
+        )
+        self.assertFalse(
+            _med_is_scheduled_today({"frequency": "Weekly", "days": ["Mon"]}, sunday)
+        )
+
+    def test_caregiver_notification_preferences(self):
+        self.assertTrue(_caregiver_wants({"notify_when": "On missed dose"}, "missed_dose"))
+        self.assertFalse(_caregiver_wants({"notify_when": "On missed dose"}, "daily_summary"))
+        self.assertTrue(_caregiver_wants({"notify_when": "Daily summary"}, "daily_summary"))
+        self.assertTrue(_caregiver_wants({"notify_when": "Both"}, "missed_dose"))
+        self.assertTrue(_caregiver_wants({"notify_when": "Both"}, "daily_summary"))
 
 
 if __name__ == "__main__":

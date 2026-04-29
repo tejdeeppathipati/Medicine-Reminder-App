@@ -16,6 +16,9 @@ CORS(user_setup_bp)
 # api routes begin below
 WHATSAPP_PREFIX = "whatsapp:"
 PHONE_PATTERN = re.compile(r'^\+?1?\d{9,15}$')
+ALLOWED_FREQUENCIES = {"Daily", "Twice daily", "Weekly", "As needed"}
+ALLOWED_DAYS = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+ALLOWED_NOTIFY_WHEN = {"On missed dose", "Daily summary", "Both"}
 
 
 def _split_phone(phone: str) -> Tuple[str, str]:
@@ -61,6 +64,15 @@ def setup_user():
 
     # this checks the time given (accepting formats)
     for med in data.get("medications", []):
+        med["frequency"] = med.get("frequency") or "Daily"
+        if med["frequency"] not in ALLOWED_FREQUENCIES:
+            return jsonify({'error': f"Invalid frequency: {med['frequency']}"})
+
+        if med["frequency"] == "As needed":
+            med["times"] = []
+            med["days"] = []
+            continue
+
         new_times = []
         for t in med.get("times", []):
             try:
@@ -70,7 +82,15 @@ def setup_user():
             except ValueError:
                 # if parsing fails, keep original time given
                 new_times.append(t.strip())
-        med["times"] = new_times
+        med["times"] = list(dict.fromkeys(new_times))
+
+        if med["frequency"] == "Weekly":
+            days = med.get("days") or []
+            if not days or any(day not in ALLOWED_DAYS for day in days):
+                return jsonify({'error': 'Weekly medications need a valid reminder day'})
+            med["days"] = days
+        else:
+            med["days"] = []
     
     # checks all requirements (determines if form is accepted or not)
     if not data.get('name'):
@@ -88,8 +108,11 @@ def setup_user():
     
     # checks correct medications
     for med in data['medications']:
-        if not med.get('name') or not med.get('dosage') or not med.get('times'):
-            return jsonify({'error': 'Medication must have name, dosage, and times'})
+        if not med.get('name') or not med.get('dosage'):
+            return jsonify({'error': 'Medication must have name and dosage'})
+
+        if med.get("frequency") != "As needed" and not med.get('times'):
+            return jsonify({'error': 'Scheduled medication must have at least one reminder time'})
         
         for time in med['times']:
             if not re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', time):
@@ -103,6 +126,9 @@ def setup_user():
         if not valid_caregiver_phone:
             return jsonify({'error': f"Invalid caregiver phone: {caregiver['phone']}"})
         caregiver['phone'] = normalized_caregiver_phone
+        caregiver['notify_when'] = caregiver.get('notify_when') or 'On missed dose'
+        if caregiver['notify_when'] not in ALLOWED_NOTIFY_WHEN:
+            return jsonify({'error': f"Invalid caregiver notification option: {caregiver['notify_when']}"})
     
     # new user added to users collection - formatting
     user_id = _user_id_from_phone(data['phone'])
